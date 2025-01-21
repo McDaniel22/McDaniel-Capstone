@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import OpenVPN from 'react-native-openvpn';
+import * as DocumentPicker from 'expo-document-picker';
 import { StyleSheet, Text, View, Button, TouchableOpacity, TextInput, Alert } from "react-native";
 
 export default function App() {
@@ -6,15 +8,40 @@ const [vpnStatus, setVpnStatus] = useState("Disconnected");
 const [certificate, setCertificate] = useState("");
 const [isConnected, setIsConnected] = useState(false);
 
-const handleConnect = () => {
-    if (certificate) {
-    setVpnStatus("Connecting...");
-    setTimeout(() => {
-        setVpnStatus("Connected");
+const handleConnect = async () => {
+    try {
+      // Step 1: Allow the user to select a certificate
+    const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/x-openvpn-profile', // Adjust MIME type based on your file format
+        copyToCacheDirectory: true,
+    });
+
+    if (result.type === 'success') {
+        // Step 2: Load the selected certificate
+        const certificateUri = result.uri;
+        const certificateName = result.name;
+
+        setVpnStatus('Connecting...');
+        
+        // Step 3: Pass the certificate to OpenVPN and establish a connection
+        OpenVPN.connect({
+          config: certificateUri, // The selected certificate file
+          username: '',           // Optional: Username, if required
+          password: '',           // Optional: Password, if required
+          compression: true,      // Optional: Enable compression
+        }).then(() => {
+        setVpnStatus('Connected');
         setIsConnected(true);
-      }, 2000); // Simulates a VPN connection process
+        Alert.alert('Success', `Connected using ${certificateName}`);
+        }).catch((error) => {
+        setVpnStatus('Disconnected');
+        Alert.alert('Error', `Failed to connect: ${error.message}`);
+        });
     } else {
-    Alert.alert("Error", "Please upload a certificate first.");
+        Alert.alert('Error', 'No certificate selected.');
+    }
+    } catch (error) {
+    Alert.alert('Error', `An error occurred: ${error.message}`);
     }
 };
 
