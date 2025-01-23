@@ -1,163 +1,259 @@
 import React, { useState } from "react";
-import OpenVPN from 'react-native-openvpn';
-import * as DocumentPicker from 'expo-document-picker';
-import { StyleSheet, Text, View, Button, TouchableOpacity, TextInput, Alert } from "react-native";
+import OpenVPN from "react-native-openvpn";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system";
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  Alert,
+} from "react-native";
 
 export default function App() {
-const [vpnStatus, setVpnStatus] = useState("Disconnected");
-const [certificate, setCertificate] = useState("");
-const [isConnected, setIsConnected] = useState(false);
+  const [vpnStatus, setVpnStatus] = useState("Disconnected");
+  const [certificates, setCertificates] = useState<
+    { name: string; content: string }[]
+  >([]); // Store uploaded certificates
+  const [selectedCertificate, setSelectedCertificate] = useState<string | null>(
+    null
+  ); // Currently selected certificate
+  const [isConnected, setIsConnected] = useState(false);
 
-const handleConnect = async () => {
+  // Upload Certificate
+  const handleUploadCertificate = async () => {
     try {
-      // Step 1: Allow the user to select a certificate
-    const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/x-openvpn-profile', // Adjust MIME type based on your file format
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "application/x-openvpn-profile", // Accept OpenVPN profiles
         copyToCacheDirectory: true,
-    });
+      });
 
-    if (result.type === 'success') {
-        // Step 2: Load the selected certificate
-        const certificateUri = result.uri;
-        const certificateName = result.name;
+      if (!result.canceled) {
+        const certificateUri = result.assets[0].uri;
+        const certificateName = result.assets[0].name;
 
-        setVpnStatus('Connecting...');
-        
-        // Step 3: Pass the certificate to OpenVPN and establish a connection
-        OpenVPN.connect({
-          config: certificateUri, // The selected certificate file
-          username: '',           // Optional: Username, if required
-          password: '',           // Optional: Password, if required
-          compression: true,      // Optional: Enable compression
-        }).then(() => {
-        setVpnStatus('Connected');
-        setIsConnected(true);
-        Alert.alert('Success', `Connected using ${certificateName}`);
-        }).catch((error) => {
-        setVpnStatus('Disconnected');
-        Alert.alert('Error', `Failed to connect: ${error.message}`);
-        });
-    } else {
-        Alert.alert('Error', 'No certificate selected.');
-    }
+        // Read file content
+        const fileContent = await FileSystem.readAsStringAsync(certificateUri);
+
+        // Add certificate to the list
+        setCertificates((prev) => [
+          ...prev,
+          { name: certificateName, content: fileContent },
+        ]);
+
+        Alert.alert("Success", `${certificateName} uploaded successfully.`);
+      } else {
+        Alert.alert("Error", "No certificate selected.");
+      }
     } catch (error) {
-    Alert.alert('Error', `An error occurred: ${error.message}`);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      Alert.alert("Error", `Failed to upload certificate: ${errorMessage}`);
     }
-};
+  };
 
-const handleDisconnect = () => {
-    setVpnStatus("Disconnecting...");
-    setTimeout(() => {
-    setVpnStatus("Disconnected");
-    setIsConnected(false);
-    }, 2000); // Simulates a VPN disconnection process
-};
+  // Connect to VPN
+  const handleConnect = async () => {
+    if (!selectedCertificate) {
+      Alert.alert("Error", "No certificate selected.");
+      return;
+    }
 
-const handleUploadCertificate = () => {
-    // For demonstration purposes, simulates certificate upload
-    setCertificate("SampleRouterCertificate123");
-    Alert.alert("Certificate Uploaded", "Your router certificate has been uploaded successfully!");
-};
+    const certificate = certificates.find(
+      (cert) => cert.name === selectedCertificate
+    );
+    if (!certificate) {
+      Alert.alert("Error", "Selected certificate not found.");
+      return;
+    }
 
-return (
+    try {
+      setVpnStatus("Connecting...");
+      await OpenVPN.connect({
+        config: certificate.content,
+        username: "",
+        password: "",
+        compression: true,
+      });
+      setVpnStatus("Connected");
+      setIsConnected(true);
+      Alert.alert("Success", `Connected using ${certificate.name}`);
+    } catch (error) {
+      setVpnStatus("Disconnected");
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      Alert.alert("Error", `Failed to connect: ${errorMessage}`);
+    }
+  };
+
+  // Disconnect VPN
+  const handleDisconnect = async () => {
+    try {
+      setVpnStatus("Disconnecting...");
+      await OpenVPN.disconnect();
+      setVpnStatus("Disconnected");
+      setIsConnected(false);
+      Alert.alert("Disconnected", "VPN has been disconnected.");
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      Alert.alert("Error", `Failed to disconnect: ${errorMessage}`);
+    }
+  };
+
+  return (
     <View style={styles.container}>
-      {/* App Header */}
-    <Text style={styles.header}>HomeNet VPN</Text>
+      <Text style={styles.header}>HomeNet VPN</Text>
 
-      {/* VPN Status Display */}
-    <Text style={styles.statusLabel}>VPN Status:</Text>
-    <Text style={[styles.status, isConnected ? styles.connected : styles.disconnected]}>
+      <Text style={styles.statusLabel}>VPN Status:</Text>
+      <Text
+        style={[
+          styles.status,
+          isConnected ? styles.connected : styles.disconnected,
+        ]}
+      >
         {vpnStatus}
-    </Text>
+      </Text>
 
-      {/* Connect/Disconnect Buttons */}
-    {!isConnected ? (
-        <TouchableOpacity style={styles.connectButton} onPress={handleConnect}>
-        <Text style={styles.buttonText}>Connect</Text>
+      {!isConnected ? (
+        <TouchableOpacity
+          style={[
+            styles.connectButton,
+            !selectedCertificate && styles.disabledButton,
+          ]}
+          onPress={handleConnect}
+          disabled={!selectedCertificate}
+        >
+          <Text style={styles.buttonText}>Connect</Text>
         </TouchableOpacity>
-    ) : (
-        <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
-        <Text style={styles.buttonText}>Disconnect</Text>
+      ) : (
+        <TouchableOpacity
+          style={styles.disconnectButton}
+          onPress={handleDisconnect}
+        >
+          <Text style={styles.buttonText}>Disconnect</Text>
         </TouchableOpacity>
-    )}
+      )}
 
-      {/* Upload Certificate Section */}
-    <View style={styles.certificateSection}>
-        <Text style={styles.label}>Manage Certificate:</Text>
-        <TouchableOpacity style={styles.uploadButton} onPress={handleUploadCertificate}>
-        <Text style={styles.buttonText}>Upload Certificate</Text>
+      <View style={styles.certificateSection}>
+        <Text style={styles.label}>Manage Certificates:</Text>
+        <TouchableOpacity
+          style={styles.uploadButton}
+          onPress={handleUploadCertificate}
+        >
+          <Text style={styles.buttonText}>Upload Certificate</Text>
         </TouchableOpacity>
-        {certificate ? <Text style={styles.certificateInfo}>Certificate: {certificate}</Text> : null}
+
+        {certificates.length > 0 && (
+          <View style={styles.certificateList}>
+            <Text style={styles.listHeader}>Uploaded Certificates:</Text>
+            {certificates.map((cert, index) => (
+              <TouchableOpacity
+                key={index}
+                style={[
+                  styles.certificateItem,
+                  selectedCertificate === cert.name && styles.selected,
+                ]}
+                onPress={() => setSelectedCertificate(cert.name)}
+              >
+                <Text style={styles.certificateText}>{cert.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </View>
     </View>
-    </View>
-);
+  );
 }
 
 const styles = StyleSheet.create({
-container: {
+  container: {
     flex: 1,
     backgroundColor: "#f4f4f4",
     alignItems: "center",
     justifyContent: "center",
     padding: 20,
-},
-header: {
+  },
+  header: {
     fontSize: 28,
     fontWeight: "bold",
     color: "#1a73e8",
     marginBottom: 20,
-},
-statusLabel: {
+  },
+  statusLabel: {
     fontSize: 18,
     color: "#333",
     marginTop: 10,
-},
-status: {
+  },
+  status: {
     fontSize: 20,
     fontWeight: "bold",
     marginBottom: 20,
-},
-connected: {
+  },
+  connected: {
     color: "green",
-},
-disconnected: {
+  },
+  disconnected: {
     color: "red",
-},
-connectButton: {
+  },
+  connectButton: {
     backgroundColor: "#1a73e8",
     padding: 15,
     borderRadius: 10,
     marginBottom: 10,
-},
-disconnectButton: {
+  },
+  disconnectButton: {
     backgroundColor: "red",
     padding: 15,
     borderRadius: 10,
     marginBottom: 10,
-},
-buttonText: {
+  },
+  buttonText: {
     color: "white",
     fontSize: 16,
     fontWeight: "bold",
     textAlign: "center",
-},
-certificateSection: {
+  },
+  certificateSection: {
     marginTop: 30,
     alignItems: "center",
-},
-label: {
+    width: "100%",
+  },
+  label: {
     fontSize: 16,
     color: "#555",
     marginBottom: 10,
-},
-uploadButton: {
+  },
+  uploadButton: {
     backgroundColor: "#1a73e8",
     padding: 10,
     borderRadius: 10,
-},
-certificateInfo: {
+    marginBottom: 10,
+  },
+  certificateList: {
     marginTop: 10,
+    width: "100%",
+  },
+  listHeader: {
+    fontSize: 16,
+    fontWeight: "bold",
+    marginBottom: 10,
+  },
+  certificateItem: {
+    padding: 10,
+    backgroundColor: "#fff",
+    marginBottom: 5,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: "#ddd",
+  },
+  selected: {
+    borderColor: "#1a73e8",
+  },
+  disabledButton: {
+    backgroundColor: "#ccc",
+  },
+  certificateText: {
     fontSize: 14,
-    color: "#666",
-},
+  },
 });
