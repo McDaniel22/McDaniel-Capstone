@@ -24,7 +24,7 @@ export default function App() {
   const handleUploadCertificate = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: "application/x-openvpn-profile", // Accept OpenVPN profiles
+        type: "*/*", // Accept OpenVPN profiles
         copyToCacheDirectory: true,
       });
 
@@ -70,10 +70,10 @@ export default function App() {
     try {
       setVpnStatus("Connecting...");
       await OpenVPN.connect({
-        config: certificate.content,
+        ovpnFileContents: certificate.content,
         username: "",
         password: "",
-        compression: true,
+        allowSelfSigned: true,
       });
       setVpnStatus("Connected");
       setIsConnected(true);
