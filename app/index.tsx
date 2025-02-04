@@ -1,14 +1,19 @@
 import React, { useState } from "react";
-import OpenVPN from "react-native-openvpn";
+//import RNSimpleOpenvpn from "react-native-simple-openvpn";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
+import 'expo-dev-client';
+import * as Device from "expo-device";
 import {
   StyleSheet,
   Text,
   View,
   TouchableOpacity,
   Alert,
+  Image,
 } from "react-native";
+
+//console.log(RNSimpleOpenvpn);
 
 export default function App() {
   const [vpnStatus, setVpnStatus] = useState("Disconnected");
@@ -24,7 +29,7 @@ export default function App() {
   const handleUploadCertificate = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: "*/*", // Accept OpenVPN profiles
+        type: "*/*", // Accept RNSimpleOpenvpn profiles
         copyToCacheDirectory: true,
       });
 
@@ -68,16 +73,18 @@ export default function App() {
     }
 
     try {
+      /*
       setVpnStatus("Connecting...");
-      await OpenVPN.connect({
-        ovpnFileContents: certificate.content,
+      await RNSimpleOpenvpn.connect({
+        ovpnString: certificate.content,
         username: "",
         password: "",
-        allowSelfSigned: true,
+        providerBundleIdentifier: ""
       });
       setVpnStatus("Connected");
       setIsConnected(true);
       Alert.alert("Success", `Connected using ${certificate.name}`);
+      */
     } catch (error) {
       setVpnStatus("Disconnected");
       const errorMessage =
@@ -89,11 +96,13 @@ export default function App() {
   // Disconnect VPN
   const handleDisconnect = async () => {
     try {
+      /*
       setVpnStatus("Disconnecting...");
-      await OpenVPN.disconnect();
+      await RNSimpleOpenvpn.disconnect();
       setVpnStatus("Disconnected");
       setIsConnected(false);
       Alert.alert("Disconnected", "VPN has been disconnected.");
+      */
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -101,9 +110,38 @@ export default function App() {
     }
   };
 
+  const handleCreateCertificate = async () => {
+    try {
+      const response = await fetch("https://your-server.com/api/create-cert", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ deviceId: "user-device-123" }),
+      });
+  
+      const data = await response.json();
+  
+      if (data.success) {
+        Alert.alert("Success", "VPN Certificate created. You can now connect remotely.");
+        setCertificates((prev) => [...prev, { name: "MyVPN.ovpn", content: data.ovpn }]);
+      } else {
+        Alert.alert("Error", "Failed to create VPN certificate.");
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      Alert.alert("Error", `Certificate creation failed: ${errorMessage}`);
+    }
+  };
+  
+
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>HomeNet VPN</Text>
+      <Image 
+        source={require('../assets/images/HomeNetLogo2.png')} 
+        style={styles.headerImage} 
+        resizeMode="contain" // This ensures the image scales well
+      />
 
       <Text style={styles.statusLabel}>VPN Status:</Text>
       <Text
@@ -144,6 +182,11 @@ export default function App() {
           <Text style={styles.buttonText}>Upload Certificate</Text>
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.createCertButton} onPress={handleCreateCertificate}>
+        <Text style={styles.buttonText}>Create VPN Certificate</Text>
+        </TouchableOpacity>
+
+
         {certificates.length > 0 && (
           <View style={styles.certificateList}>
             <Text style={styles.listHeader}>Uploaded Certificates:</Text>
@@ -180,6 +223,11 @@ const styles = StyleSheet.create({
     color: "#1a73e8",
     marginBottom: 20,
   },
+  headerImage: {
+    width: 500, 
+    height: 300, 
+    marginBottom: 20, 
+  },
   statusLabel: {
     fontSize: 18,
     color: "#333",
@@ -205,6 +253,12 @@ const styles = StyleSheet.create({
   disconnectButton: {
     backgroundColor: "red",
     padding: 15,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  createCertButton: {
+    backgroundColor: "#4CAF50", 
+    padding: 10,
     borderRadius: 10,
     marginBottom: 10,
   },

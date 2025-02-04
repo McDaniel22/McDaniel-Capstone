@@ -1,12 +1,27 @@
 {
-    "expo": {
+  "expo": {
     "name": "HomeNet",
     "slug": "homenet",
     "version": "1.0.0",
-    "platforms": ["ios", "android", "web"],
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "homenet",
-    "newArchEnabled": true
+    "newArchEnabled": true,
+    "extra": {
+      "eas": {
+        "projectId": "6a3a5069-7c4c-4718-bd41-97be672177ab"
+      }
+    },
+    "android": {
+      "package": "com.amcdaniel22.homenet"
+    },
+    "ios": {
+      "bundleIdentifier": "com.amcdaniel22.homenet"
     }
+  }
 }
