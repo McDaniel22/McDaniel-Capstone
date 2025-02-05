@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-//import RNSimpleOpenvpn from "react-native-simple-openvpn";
+import RNSimpleOpenvpn from "react-native-simple-openvpn";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import 'expo-dev-client';
@@ -73,18 +73,18 @@ export default function App() {
     }
 
     try {
-      /*
+      
       setVpnStatus("Connecting...");
       await RNSimpleOpenvpn.connect({
         ovpnString: certificate.content,
-        username: "",
-        password: "",
+        username: "AMcDaniel",
+        password: "test123!",
         providerBundleIdentifier: ""
       });
       setVpnStatus("Connected");
       setIsConnected(true);
       Alert.alert("Success", `Connected using ${certificate.name}`);
-      */
+      
     } catch (error) {
       setVpnStatus("Disconnected");
       const errorMessage =
@@ -96,13 +96,13 @@ export default function App() {
   // Disconnect VPN
   const handleDisconnect = async () => {
     try {
-      /*
+      
       setVpnStatus("Disconnecting...");
       await RNSimpleOpenvpn.disconnect();
       setVpnStatus("Disconnected");
       setIsConnected(false);
       Alert.alert("Disconnected", "VPN has been disconnected.");
-      */
+      
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
