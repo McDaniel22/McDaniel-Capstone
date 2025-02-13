@@ -4,57 +4,67 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import 'expo-dev-client';
 import * as Device from "expo-device";
-import {
-  StyleSheet,
-  Text,
-  View,
-  TouchableOpacity,
-  Alert,
-  Image,
-} from "react-native";
+import {StyleSheet,Text,View,TouchableOpacity,Alert,Image,ScrollView,Modal,TextInput,} from "react-native";
 
-//console.log(RNSimpleOpenvpn);
 
 export default function App() {
-  const [vpnStatus, setVpnStatus] = useState("Disconnected");
-  const [certificates, setCertificates] = useState<
-    { name: string; content: string }[]
-  >([]); // Store uploaded certificates
-  const [selectedCertificate, setSelectedCertificate] = useState<string | null>(
-    null
-  ); // Currently selected certificate
-  const [isConnected, setIsConnected] = useState(false);
 
-  // Upload Certificate
-  const handleUploadCertificate = async () => {
+// State to store username and password input by the user
+const [username, setUsername] = useState("");
+const [password, setPassword] = useState("");
+// Modal visibility state for prompting user credentials
+const [modalVisible, setModalVisible] = useState(false);
+// Store the name and content of the certificate currently being uploaded
+const [currentCertName, setCurrentCertName] = useState("");
+const [currentCertContent, setCurrentCertContent] = useState("");
+const [vpnStatus, setVpnStatus] = useState("Disconnected");
+const [certificates, setCertificates] = useState<{ name: string; content: string; username: string; password: string }[]>([]);
+// Store uploaded certificates
+const [selectedCertificate, setSelectedCertificate] = useState<string | null>(null); // Currently selected certificate
+const [isConnected, setIsConnected] = useState(false);
+
+  // Import Certificate
+  const handleImportCertificate = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: "*/*", // Accept RNSimpleOpenvpn profiles
-        copyToCacheDirectory: true,
+        type: "*/*", // Accept all files
+        copyToCacheDirectory: true
       });
 
       if (!result.canceled) {
         const certificateUri = result.assets[0].uri;
         const certificateName = result.assets[0].name;
-
         // Read file content
         const fileContent = await FileSystem.readAsStringAsync(certificateUri);
-
+          //update state first then save
+          setCurrentCertName(certificateName);
+          setCurrentCertContent(fileContent);
+          setModalVisible(true);
         // Add certificate to the list
-        setCertificates((prev) => [
-          ...prev,
-          { name: certificateName, content: fileContent },
-        ]);
-
-        Alert.alert("Success", `${certificateName} uploaded successfully.`);
+        
       } else {
         Alert.alert("Error", "No certificate selected.");
-      }
+      }// checks if its an ovpn file
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       Alert.alert("Error", `Failed to upload certificate: ${errorMessage}`);
     }
+  };
+  // Function to save the certificate along with user-provided credentials
+  const saveCertificate = async() => {
+    if (!currentCertName || !currentCertContent) {
+      Alert.alert("Error", "No certificate to save.");
+      return;
+    }
+    setModalVisible(false);// Open modal to ask for username and password
+    setCertificates(prev => [
+      ...prev,
+      { name: currentCertName, content: currentCertContent, username, password },
+    ]);
+    // Reset state and close modal
+    setCurrentCertName("");
+    setCurrentCertContent("");
+    Alert.alert("Success", `${currentCertName} uploaded successfully.`);
   };
 
   // Connect to VPN
@@ -63,32 +73,30 @@ export default function App() {
       Alert.alert("Error", "No certificate selected.");
       return;
     }
-
-    const certificate = certificates.find(
-      (cert) => cert.name === selectedCertificate
-    );
-    if (!certificate) {
-      Alert.alert("Error", "Selected certificate not found.");
+    //if (!username || !password) return;
+    const certificate = certificates.find(cert => cert.name === selectedCertificate);
+    if (!certificate || !certificate.content || !certificate.username || !certificate.password) {
+      Alert.alert("Error", "Invalid certificate data.");
       return;
     }
-
+    
+  
     try {
-      
       setVpnStatus("Connecting...");
       await RNSimpleOpenvpn.connect({
         ovpnString: certificate.content,
-        username: "AMcDaniel",
-        password: "test123!",
+        username: certificate.username,
+        password: certificate.password,
         providerBundleIdentifier: ""
       });
+      console.log(username);
+      console.log(password);
       setVpnStatus("Connected");
       setIsConnected(true);
       Alert.alert("Success", `Connected using ${certificate.name}`);
-      
     } catch (error) {
       setVpnStatus("Disconnected");
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       Alert.alert("Error", `Failed to connect: ${errorMessage}`);
     }
   };
@@ -96,7 +104,10 @@ export default function App() {
   // Disconnect VPN
   const handleDisconnect = async () => {
     try {
-      
+      if (!isConnected) {
+        Alert.alert("Error", "VPN is not connected.");
+        return;
+      }
       setVpnStatus("Disconnecting...");
       await RNSimpleOpenvpn.disconnect();
       setVpnStatus("Disconnected");
@@ -104,8 +115,7 @@ export default function App() {
       Alert.alert("Disconnected", "VPN has been disconnected.");
       
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       Alert.alert("Error", `Failed to disconnect: ${errorMessage}`);
     }
   };
@@ -124,7 +134,7 @@ export default function App() {
   
       if (data.success) {
         Alert.alert("Success", "VPN Certificate created. You can now connect remotely.");
-        setCertificates((prev) => [...prev, { name: "MyVPN.ovpn", content: data.ovpn }]);
+        setCertificates((prev) => [...prev, { name: "MyVPN.ovpn", content: data.ovpn, username, password }]);
       } else {
         Alert.alert("Error", "Failed to create VPN certificate.");
       }
@@ -136,6 +146,7 @@ export default function App() {
   
 
   return (
+    <ScrollView>
     <View style={styles.container}>
       <Image 
         source={require('../assets/images/HomeNetLogo2.png')} 
@@ -176,10 +187,10 @@ export default function App() {
       <View style={styles.certificateSection}>
         <Text style={styles.label}>Manage Certificates:</Text>
         <TouchableOpacity
-          style={styles.uploadButton}
-          onPress={handleUploadCertificate}
+          style={styles.importButton}
+          onPress={handleImportCertificate}
         >
-          <Text style={styles.buttonText}>Upload Certificate</Text>
+          <Text style={styles.buttonText}>Import Certificate</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.createCertButton} onPress={handleCreateCertificate}>
@@ -189,7 +200,7 @@ export default function App() {
 
         {certificates.length > 0 && (
           <View style={styles.certificateList}>
-            <Text style={styles.listHeader}>Uploaded Certificates:</Text>
+            <Text style={styles.listHeader}>Imported Certificates:</Text>
             {certificates.map((cert, index) => (
               <TouchableOpacity
                 key={index}
@@ -205,9 +216,43 @@ export default function App() {
           </View>
         )}
       </View>
+      {/* Modal for Username and Password */}
+      <Modal
+          visible={modalVisible}
+          transparent={true}
+          animationType="slide"
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContainer}>
+              <Text style={styles.modalTitle}>Enter Credentials</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Username"
+                value={username}
+                onChangeText={setUsername}
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Password"
+                value={password}
+                secureTextEntry
+                onChangeText={setPassword}
+              />
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={saveCertificate}
+              >
+                <Text style={styles.buttonText}>Save Certificate</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
     </View>
+    </ScrollView>
   );
 }
+
+
 
 const styles = StyleSheet.create({
   container: {
@@ -245,7 +290,7 @@ const styles = StyleSheet.create({
     color: "red",
   },
   connectButton: {
-    backgroundColor: "#1a73e8",
+    backgroundColor: "#3a7fbc",
     padding: 15,
     borderRadius: 10,
     marginBottom: 10,
@@ -257,7 +302,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   createCertButton: {
-    backgroundColor: "#4CAF50", 
+    backgroundColor: "#4cb3fa", 
     padding: 10,
     borderRadius: 10,
     marginBottom: 10,
@@ -278,24 +323,30 @@ const styles = StyleSheet.create({
     color: "#555",
     marginBottom: 10,
   },
-  uploadButton: {
-    backgroundColor: "#1a73e8",
+  importButton: {
+    backgroundColor: "#1e2b4e",
     padding: 10,
     borderRadius: 10,
     marginBottom: 10,
   },
   certificateList: {
-    marginTop: 10,
-    width: "100%",
+    marginTop: 20,
+    width: "90%",
+    backgroundColor: "#fff",
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#ddd",
   },
   listHeader: {
     fontSize: 16,
     fontWeight: "bold",
     marginBottom: 10,
+    color: "#333",
   },
   certificateItem: {
     padding: 10,
-    backgroundColor: "#fff",
+    backgroundColor: "#f9f9f9",
     marginBottom: 5,
     borderRadius: 5,
     borderWidth: 1,
@@ -303,11 +354,62 @@ const styles = StyleSheet.create({
   },
   selected: {
     borderColor: "#1a73e8",
+    backgroundColor: "#eaf3ff",
   },
   disabledButton: {
     backgroundColor: "#ccc",
   },
   certificateText: {
     fontSize: 14,
+    color: "#444",
+  },
+  modalBackground: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  },
+  modalContainer: {
+    width: "80%",
+    backgroundColor: "white",
+    padding: 20,
+    borderRadius: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5, // For Android shadow
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  modalInput: {
+    height: 40,
+    borderColor: "#ccc",
+    borderWidth: 1,
+    borderRadius: 5,
+    paddingHorizontal: 10,
+    marginBottom: 15,
+  },
+  modalButton: {
+    backgroundColor: "#1a73e8",
+    paddingVertical: 10,
+    borderRadius: 5,
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  modalButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  modalCancelButton: {
+    backgroundColor: "#888",
+    paddingVertical: 10,
+    borderRadius: 5,
+    alignItems: "center",
   },
 });

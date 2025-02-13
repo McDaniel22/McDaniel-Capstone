@@ -22,6 +22,9 @@
     },
     "ios": {
       "bundleIdentifier": "com.amcdaniel22.homenet"
-    }
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }
