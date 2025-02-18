@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import RNSimpleOpenvpn from "react-native-simple-openvpn";
 import * as DocumentPicker from "expo-document-picker";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
 import 'expo-dev-client';
 import * as Device from "expo-device";
@@ -34,6 +35,17 @@ const [isConnected, setIsConnected] = useState(false);
       if (!result.canceled) {
         const certificateUri = result.assets[0].uri;
         const certificateName = result.assets[0].name;
+          // Check if the selected file is an OpenVPN file
+          if (!certificateName.endsWith(".ovpn")) {
+            Alert.alert("Error", "Please select a valid OpenVPN (.ovpn) file.");
+            return;
+          }
+             // Save the file permanently in the app's document directory
+      const newFileUri = `${FileSystem.documentDirectory}${certificateName}`;
+      await FileSystem.copyAsync({
+        from: certificateUri,
+        to: newFileUri
+      });
         // Read file content
         const fileContent = await FileSystem.readAsStringAsync(certificateUri);
           //update state first then save
@@ -50,37 +62,59 @@ const [isConnected, setIsConnected] = useState(false);
       Alert.alert("Error", `Failed to upload certificate: ${errorMessage}`);
     }
   };
+  const saveCertificatesToStorage = async (certificates: { name: string; content: string; username: string; password: string; }[]) => {
+    try {
+      await AsyncStorage.setItem("certificates", JSON.stringify(certificates));
+    } catch (error) {
+      Alert.alert("Error", "Failed to save certificates.");
+    }
+  };
   // Function to save the certificate along with user-provided credentials
   const saveCertificate = async() => {
     if (!currentCertName || !currentCertContent) {
       Alert.alert("Error", "No certificate to save.");
       return;
     }
-    setModalVisible(false);// Open modal to ask for username and password
-    setCertificates(prev => [
-      ...prev,
-      { name: currentCertName, content: currentCertContent, username, password },
-    ]);
+    setModalVisible(false);// close modal after saving
+    const newCertificates = [
+      ...certificates,
+      { name: currentCertName, content: currentCertContent, username, password }
+    ];
+    setCertificates(newCertificates);
+    await saveCertificatesToStorage(newCertificates); // Save to AsyncStorage
     // Reset state and close modal
     setCurrentCertName("");
     setCurrentCertContent("");
     Alert.alert("Success", `${currentCertName} uploaded successfully.`);
   };
-
-  // Connect to VPN
+  const loadCertificatesFromStorage = async () => {
+    try {
+      const storedCertificates = await AsyncStorage.getItem("certificates");
+      if (storedCertificates) {
+        setCertificates(JSON.parse(storedCertificates));
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to load certificates.");
+    }
+  };
+  
+  // Certs load on start
+  React.useEffect(() => {
+    loadCertificatesFromStorage();
+  }, []);
+  
   const handleConnect = async () => {
     if (!selectedCertificate) {
       Alert.alert("Error", "No certificate selected.");
       return;
     }
-    //if (!username || !password) return;
+    
     const certificate = certificates.find(cert => cert.name === selectedCertificate);
     if (!certificate || !certificate.content || !certificate.username || !certificate.password) {
       Alert.alert("Error", "Invalid certificate data.");
       return;
     }
     
-  
     try {
       setVpnStatus("Connecting...");
       await RNSimpleOpenvpn.connect({
@@ -89,8 +123,14 @@ const [isConnected, setIsConnected] = useState(false);
         password: certificate.password,
         providerBundleIdentifier: ""
       });
-      console.log(username);
-      console.log(password);
+  
+      // Wait for VPN to fully connect
+      let status = await RNSimpleOpenvpn.getCurrentState();
+      while (status !== RNSimpleOpenvpn.VpnState.VPN_STATE_CONNECTED) {
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        status = await RNSimpleOpenvpn.getCurrentState();
+      }
+  
       setVpnStatus("Connected");
       setIsConnected(true);
       Alert.alert("Success", `Connected using ${certificate.name}`);
@@ -100,6 +140,7 @@ const [isConnected, setIsConnected] = useState(false);
       Alert.alert("Error", `Failed to connect: ${errorMessage}`);
     }
   };
+  
 
   // Disconnect VPN
   const handleDisconnect = async () => {
@@ -121,6 +162,8 @@ const [isConnected, setIsConnected] = useState(false);
   };
 
   const handleCreateCertificate = async () => {
+    const forge = require('node-forge');
+    //const fs = require('fs');
     try {
       const response = await fetch("https://your-server.com/api/create-cert", {
         method: "POST",
@@ -143,15 +186,45 @@ const [isConnected, setIsConnected] = useState(false);
       Alert.alert("Error", `Certificate creation failed: ${errorMessage}`);
     }
   };
+  const handleDeleteCertificate = (nameToDelete: string) => {
+    Alert.alert(
+      "Delete Certificate",
+      `Are you sure you want to delete ${nameToDelete}?`,
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const updatedCertificates = certificates.filter(cert => cert.name !== nameToDelete);
+            setCertificates(updatedCertificates);
+            await saveCertificatesToStorage(updatedCertificates);
+            // Delete the actual file from storage
+            const certToDelete = certificates.find(cert => cert.name === nameToDelete);
+            if (certToDelete) {
+              await FileSystem.deleteAsync(certToDelete.content);
+            }
+            if (selectedCertificate === nameToDelete) {
+              setSelectedCertificate(null);
+            }
+            Alert.alert("Deleted", `${nameToDelete} has been deleted.`);
+          },
+        },
+      ]
+    );
+  };
   
-
+  
   return (
     <ScrollView>
     <View style={styles.container}>
       <Image 
         source={require('../assets/images/HomeNetLogo2.png')} 
         style={styles.headerImage} 
-        resizeMode="contain" // This ensures the image scales well
+        resizeMode="contain" 
       />
 
       <Text style={styles.statusLabel}>VPN Status:</Text>
@@ -196,26 +269,35 @@ const [isConnected, setIsConnected] = useState(false);
         <TouchableOpacity style={styles.createCertButton} onPress={handleCreateCertificate}>
         <Text style={styles.buttonText}>Create VPN Certificate</Text>
         </TouchableOpacity>
+        
 
 
         {certificates.length > 0 && (
-          <View style={styles.certificateList}>
-            <Text style={styles.listHeader}>Imported Certificates:</Text>
-            {certificates.map((cert, index) => (
-              <TouchableOpacity
-                key={index}
-                style={[
-                  styles.certificateItem,
-                  selectedCertificate === cert.name && styles.selected,
-                ]}
-                onPress={() => setSelectedCertificate(cert.name)}
-              >
-                <Text style={styles.certificateText}>{cert.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+  <View style={styles.certificateList}>
+    <Text style={styles.listHeader}>Imported Certificates:</Text>
+    {certificates.map((cert, index) => (
+      <View key={index} style={styles.certificateItemContainer}>
+        <TouchableOpacity
+          style={[
+            styles.certificateItem,
+            selectedCertificate === cert.name && styles.selected,
+          ]}
+          onPress={() => setSelectedCertificate(cert.name)}
+        >
+          <Text style={styles.certificateText}>{cert.name}</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() => handleDeleteCertificate(cert.name)}
+        >
+          <Text style={styles.deleteButtonText}>Delete</Text>
+        </TouchableOpacity>
       </View>
+    ))}
+  </View>
+)}
+
       {/* Modal for Username and Password */}
       <Modal
           visible={modalVisible}
@@ -247,6 +329,7 @@ const [isConnected, setIsConnected] = useState(false);
             </View>
           </View>
         </Modal>
+    </View>
     </View>
     </ScrollView>
   );
@@ -363,6 +446,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#444",
   },
+  certificateItemContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#f8f8f8",
+    padding: 10,
+    marginVertical: 5,
+    borderRadius: 8,
+  },
+  
+  deleteButton: {
+    backgroundColor: "#FF6347",
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 5,
+  },
+  
+  deleteButtonText: {
+    color: "white",
+    fontWeight: "bold",
+  },
+  
   modalBackground: {
     flex: 1,
     justifyContent: "center",
@@ -371,6 +476,7 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: "80%",
+    margin: "auto",
     backgroundColor: "white",
     padding: 20,
     borderRadius: 10,
