@@ -4,17 +4,18 @@ import * as DocumentPicker from "expo-document-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
 import 'expo-dev-client';
-import * as Device from "expo-device";
+import forge from 'node-forge';
+import RNFS from 'react-native-fs';
 import {StyleSheet,Text,View,TouchableOpacity,Alert,Image,ScrollView,Modal,TextInput,} from "react-native";
 
 
 export default function App() {
-
 // State to store username and password input by the user
 const [username, setUsername] = useState("");
 const [password, setPassword] = useState("");
-// Modal visibility state for prompting user credentials
-const [modalVisible, setModalVisible] = useState(false);
+// Modal visibility state for prompting user credentials & saving certificates
+const [modalVisibleImport, setModalVisibleImport] = useState(false);
+const [modalVisibleCreate, setModalVisibleCreate] = useState(false);
 // Store the name and content of the certificate currently being uploaded
 const [currentCertName, setCurrentCertName] = useState("");
 const [currentCertContent, setCurrentCertContent] = useState("");
@@ -51,7 +52,7 @@ const [isConnected, setIsConnected] = useState(false);
           //update state first then save
           setCurrentCertName(certificateName);
           setCurrentCertContent(fileContent);
-          setModalVisible(true);
+          setModalVisibleImport(true);
         // Add certificate to the list
         
       } else {
@@ -71,11 +72,11 @@ const [isConnected, setIsConnected] = useState(false);
   };
   // Function to save the certificate along with user-provided credentials
   const saveCertificate = async() => {
-    if (!currentCertName || !currentCertContent) {
-      Alert.alert("Error", "No certificate to save.");
+    if (!currentCertName || !currentCertContent || !username || !password) {
+      Alert.alert("Error", "Missing required fields!");
       return;
     }
-    setModalVisible(false);// close modal after saving
+    setModalVisibleImport(false);// close modal after saving
     const newCertificates = [
       ...certificates,
       { name: currentCertName, content: currentCertContent, username, password }
@@ -108,7 +109,14 @@ const [isConnected, setIsConnected] = useState(false);
       Alert.alert("Error", "No certificate selected.");
       return;
     }
-    
+    const filePath = `${RNFS.DocumentDirectoryPath}/${selectedCertificate}`;
+    const fileExists = await RNFS.exists(filePath);
+    if (!fileExists) {
+      Alert.alert("Error", "VPN certificate file not found.");
+      return;
+    }
+const ovpnString = await RNFS.readFile(filePath, 'utf8');
+console.log("OVPN File Content:", ovpnString);
     const certificate = certificates.find(cert => cert.name === selectedCertificate);
     if (!certificate || !certificate.content || !certificate.username || !certificate.password) {
       Alert.alert("Error", "Invalid certificate data.");
@@ -118,7 +126,7 @@ const [isConnected, setIsConnected] = useState(false);
     try {
       setVpnStatus("Connecting...");
       await RNSimpleOpenvpn.connect({
-        ovpnString: certificate.content,
+        ovpnString: ovpnString,
         username: certificate.username,
         password: certificate.password,
         providerBundleIdentifier: ""
@@ -160,32 +168,6 @@ const [isConnected, setIsConnected] = useState(false);
       Alert.alert("Error", `Failed to disconnect: ${errorMessage}`);
     }
   };
-
-  const handleCreateCertificate = async () => {
-    const forge = require('node-forge');
-    //const fs = require('fs');
-    try {
-      const response = await fetch("https://your-server.com/api/create-cert", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ deviceId: "user-device-123" }),
-      });
-  
-      const data = await response.json();
-  
-      if (data.success) {
-        Alert.alert("Success", "VPN Certificate created. You can now connect remotely.");
-        setCertificates((prev) => [...prev, { name: "MyVPN.ovpn", content: data.ovpn, username, password }]);
-      } else {
-        Alert.alert("Error", "Failed to create VPN certificate.");
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      Alert.alert("Error", `Certificate creation failed: ${errorMessage}`);
-    }
-  };
   const handleDeleteCertificate = (nameToDelete: string) => {
     Alert.alert(
       "Delete Certificate",
@@ -216,8 +198,131 @@ const [isConnected, setIsConnected] = useState(false);
       ]
     );
   };
-  
-  
+  // Function to create a VPN certificate
+  const handleCreateCertificate = async () => {
+    try {
+      // Generate CA Key Pair
+      Alert.alert("Creating Certificate", "Please wait while we create your certificate. This may take a minute.");
+      const generateStaticKey = () => {
+        const staticKey = forge.util.bytesToHex(forge.random.getBytesSync(2048)); // Generates a 2048-bit static key
+        return `-----BEGIN OpenVPN Static key V1-----\n${staticKey}\n-----END OpenVPN Static key V1-----`;
+      };
+      const caKeys = forge.pki.rsa.generateKeyPair(2048);
+      const caCert = forge.pki.createCertificate();
+      caCert.publicKey = caKeys.publicKey;
+      caCert.serialNumber = '01';
+      caCert.validity.notBefore = new Date();
+      caCert.validity.notAfter = new Date();
+      caCert.validity.notAfter.setFullYear(caCert.validity.notBefore.getFullYear() + 10);
+      //console.log(caCert)
+      const caAttrs = [{ name: 'commonName', value: 'HomeNet CA' }];
+      caCert.setSubject(caAttrs);
+      caCert.setIssuer(caAttrs);
+      caCert.setExtensions([{ name: 'basicConstraints', cA: true }]);
+      caCert.sign(caKeys.privateKey, forge.md.sha256.create());
+      console.log(caAttrs)
+      
+      // Save CA Certificate and Key
+      const caCertPem = forge.pki.certificateToPem(caCert);
+      const caKeyPem = forge.pki.privateKeyToPem(caKeys.privateKey);
+      await RNFS.writeFile(RNFS.DocumentDirectoryPath + '/ca.crt', caCertPem, 'utf8');
+      await RNFS.writeFile(RNFS.DocumentDirectoryPath + '/ca.key', caKeyPem, 'utf8');
+      // Function to create client certificate with username metadata
+      const generateCertificate = async (commonName: string) => {
+        const keys = forge.pki.rsa.generateKeyPair(2048);
+        const cert = forge.pki.createCertificate();
+        cert.publicKey = keys.publicKey;
+        cert.serialNumber = (Math.floor(Math.random() * 1000000) + 1).toString();
+        cert.validity.notBefore = new Date();
+        cert.validity.notAfter = new Date();
+        cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 5);
+        const certName = `${commonName}_${currentCertName}`;
+        
+        cert.setSubject([
+          { name: 'commonName', value: certName },
+          { name: 'organizationName', value: 'HomeNet VPN' },
+          { name: 'organizationalUnitName', value: username }, // Store username in the cert metadata
+        ]);
+        
+        cert.setIssuer(caCert.subject.attributes);
+        cert.setExtensions([
+          { name: 'basicConstraints', cA: false },
+          { name: 'keyUsage', keyCertSign: false, digitalSignature: true, keyEncipherment: true },
+          { name: 'extendedKeyUsage', serverAuth: false, clientAuth: true }
+        ]);
+        cert.sign(caKeys.privateKey, forge.md.sha256.create());
+        //const certName = `${commonName}_${currentCertName}`;
+        const caCertPem = forge.pki.certificateToPem(caCert);
+        const certPem = forge.pki.certificateToPem(cert);
+        const keyPem = forge.pki.privateKeyToPem(keys.privateKey);
+        const filename = `${certName}.ovpn`;
+        const staticKey = generateStaticKey();
+        const ovpnProfile = `
+          client
+          dev tun
+          proto udp
+          remote your.server.com 1194
+          resolv-retry infinite
+          nobind
+          persist-key
+          persist-tun
+          auth SHA256
+          cipher AES-256-CBC
+          verb 3
+          <ca>
+          ${caCertPem.trim()}
+          </ca>
+
+          <cert>
+          ${certPem.trim()}
+          </cert>
+          
+          <key>
+          ${keyPem.trim()}
+          </key>
+
+          <tls-auth>
+          ${staticKey.trim()}
+          </tls-auth>
+          `;
+        console.log(filename)
+        console.log(username)
+        console.log(password)
+        console.log(certName);
+        await RNFS.writeFile(`${RNFS.DocumentDirectoryPath}/${filename}`, ovpnProfile, "utf8");
+        // Store the certificate in the app’s document directory
+        // Update the imported certificate list
+        setCertificates((prev) => [
+          ...prev,
+          { name: filename, content: ovpnProfile, username, password },
+        ]);
+        Alert.alert(
+          "Success",
+          `VPN Certificate created for ${certName}. You can now connect remotely.`,
+          [{ text: "OK" }]
+        );
+          const saveCreatedCertificate = async (certName: any, certContent: any, username: any, password: any) => {
+            const newCert = { name: certName, content: certContent, username, password };
+            const updatedCerts = [...certificates, newCert];
+          
+            setCertificates(updatedCerts);
+            await AsyncStorage.setItem("certificates", JSON.stringify(updatedCerts));
+          };
+          
+          await saveCreatedCertificate(filename, certPem, username, password);
+      };
+
+      // Generate client certificate using username input
+      await generateCertificate('client');
+      setModalVisibleCreate(false);
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      Alert.alert("Error", `Certificate creation failed: ${errorMessage}`);
+      console.log(errorMessage);
+    }
+  };
+    
   return (
     <ScrollView>
     <View style={styles.container}>
@@ -266,12 +371,10 @@ const [isConnected, setIsConnected] = useState(false);
           <Text style={styles.buttonText}>Import Certificate</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.createCertButton} onPress={handleCreateCertificate}>
+        <TouchableOpacity style={styles.createCertButton} onPress={() => setModalVisibleCreate(true)}>
         <Text style={styles.buttonText}>Create VPN Certificate</Text>
         </TouchableOpacity>
         
-
-
         {certificates.length > 0 && (
   <View style={styles.certificateList}>
     <Text style={styles.listHeader}>Imported Certificates:</Text>
@@ -300,7 +403,7 @@ const [isConnected, setIsConnected] = useState(false);
 
       {/* Modal for Username and Password */}
       <Modal
-          visible={modalVisible}
+          visible={modalVisibleImport}
           transparent={true}
           animationType="slide"
         >
@@ -323,6 +426,42 @@ const [isConnected, setIsConnected] = useState(false);
               <TouchableOpacity
                 style={styles.modalButton}
                 onPress={saveCertificate}
+              >
+                <Text style={styles.buttonText}>Save Certificate</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+        <Modal
+          visible={modalVisibleCreate}
+          transparent={true}
+          animationType="slide"
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContainer}>
+              <Text style={styles.modalTitle}>Enter Credentials</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Username"
+                value={username}
+                onChangeText={setUsername}
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Password"
+                value={password}
+                secureTextEntry
+                onChangeText={setPassword}
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Certificate Name"
+                value={currentCertName}
+                onChangeText={setCurrentCertName}
+              />
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={handleCreateCertificate}
               >
                 <Text style={styles.buttonText}>Save Certificate</Text>
               </TouchableOpacity>
