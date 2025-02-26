@@ -6,24 +6,24 @@ import * as FileSystem from "expo-file-system";
 import 'expo-dev-client';
 import forge from 'node-forge';
 import RNFS from 'react-native-fs';
-import {StyleSheet,Text,View,TouchableOpacity,Alert,Image,ScrollView,Modal,TextInput,} from "react-native";
+import { StyleSheet, Text, View, TouchableOpacity, Alert, Image, ScrollView, Modal, TextInput, } from "react-native";
 
 
 export default function App() {
-// State to store username and password input by the user
-const [username, setUsername] = useState("");
-const [password, setPassword] = useState("");
-// Modal visibility state for prompting user credentials & saving certificates
-const [modalVisibleImport, setModalVisibleImport] = useState(false);
-const [modalVisibleCreate, setModalVisibleCreate] = useState(false);
-// Store the name and content of the certificate currently being uploaded
-const [currentCertName, setCurrentCertName] = useState("");
-const [currentCertContent, setCurrentCertContent] = useState("");
-const [vpnStatus, setVpnStatus] = useState("Disconnected");
-const [certificates, setCertificates] = useState<{ name: string; content: string; username: string; password: string }[]>([]);
-// Store uploaded certificates
-const [selectedCertificate, setSelectedCertificate] = useState<string | null>(null); // Currently selected certificate
-const [isConnected, setIsConnected] = useState(false);
+  // State to store username and password input by the user
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  // Modal visibility state for prompting user credentials & saving certificates
+  const [modalVisibleImport, setModalVisibleImport] = useState(false);
+  const [modalVisibleCreate, setModalVisibleCreate] = useState(false);
+  // Store the name and content of the certificate currently being uploaded
+  const [currentCertName, setCurrentCertName] = useState("");
+  const [currentCertContent, setCurrentCertContent] = useState("");
+  const [vpnStatus, setVpnStatus] = useState("Disconnected");
+  const [certificates, setCertificates] = useState<{ name: string; content: string; username: string; password: string }[]>([]);
+  // Store uploaded certificates
+  const [selectedCertificate, setSelectedCertificate] = useState<string | null>(null); // Currently selected certificate
+  const [isConnected, setIsConnected] = useState(false);
 
   // Import Certificate
   const handleImportCertificate = async () => {
@@ -36,25 +36,25 @@ const [isConnected, setIsConnected] = useState(false);
       if (!result.canceled) {
         const certificateUri = result.assets[0].uri;
         const certificateName = result.assets[0].name;
-          // Check if the selected file is an OpenVPN file
-          if (!certificateName.endsWith(".ovpn")) {
-            Alert.alert("Error", "Please select a valid OpenVPN (.ovpn) file.");
-            return;
-          }
-             // Save the file permanently in the app's document directory
-      const newFileUri = `${FileSystem.documentDirectory}${certificateName}`;
-      await FileSystem.copyAsync({
-        from: certificateUri,
-        to: newFileUri
-      });
+        // Check if the selected file is an OpenVPN file
+        if (!certificateName.endsWith(".ovpn")) {
+          Alert.alert("Error", "Please select a valid OpenVPN (.ovpn) file.");
+          return;
+        }
+        // Save the file permanently in the app's document directory
+        const newFileUri = `${FileSystem.documentDirectory}${certificateName}`;
+        await FileSystem.copyAsync({
+          from: certificateUri,
+          to: newFileUri
+        });
         // Read file content
         const fileContent = await FileSystem.readAsStringAsync(certificateUri);
-          //update state first then save
-          setCurrentCertName(certificateName);
-          setCurrentCertContent(fileContent);
-          setModalVisibleImport(true);
+        //update state first then save
+        setCurrentCertName(certificateName);
+        setCurrentCertContent(fileContent);
+        setModalVisibleImport(true);
         // Add certificate to the list
-        
+
       } else {
         Alert.alert("Error", "No certificate selected.");
       }// checks if its an ovpn file
@@ -71,7 +71,7 @@ const [isConnected, setIsConnected] = useState(false);
     }
   };
   // Function to save the certificate along with user-provided credentials
-  const saveCertificate = async() => {
+  const saveCertificate = async () => {
     if (!currentCertName || !currentCertContent || !username || !password) {
       Alert.alert("Error", "Missing required fields!");
       return;
@@ -98,12 +98,12 @@ const [isConnected, setIsConnected] = useState(false);
       Alert.alert("Error", "Failed to load certificates.");
     }
   };
-  
+
   // Certs load on start
   React.useEffect(() => {
     loadCertificatesFromStorage();
   }, []);
-  
+
   const handleConnect = async () => {
     if (!selectedCertificate) {
       Alert.alert("Error", "No certificate selected.");
@@ -115,14 +115,14 @@ const [isConnected, setIsConnected] = useState(false);
       Alert.alert("Error", "VPN certificate file not found.");
       return;
     }
-const ovpnString = await RNFS.readFile(filePath, 'utf8');
-console.log("OVPN File Content:", ovpnString);
+    const ovpnString = await RNFS.readFile(filePath, 'utf8');
+    console.log("OVPN File Content:", ovpnString);
     const certificate = certificates.find(cert => cert.name === selectedCertificate);
     if (!certificate || !certificate.content || !certificate.username || !certificate.password) {
       Alert.alert("Error", "Invalid certificate data.");
       return;
     }
-    
+
     try {
       setVpnStatus("Connecting...");
       await RNSimpleOpenvpn.connect({
@@ -131,14 +131,16 @@ console.log("OVPN File Content:", ovpnString);
         password: certificate.password,
         providerBundleIdentifier: ""
       });
-  
+
       // Wait for VPN to fully connect
       let status = await RNSimpleOpenvpn.getCurrentState();
       while (status !== RNSimpleOpenvpn.VpnState.VPN_STATE_CONNECTED) {
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
         status = await RNSimpleOpenvpn.getCurrentState();
+        console.log(status);
+        console.log(JSON.stringify(RNSimpleOpenvpn.VpnState));
       }
-  
+
       setVpnStatus("Connected");
       setIsConnected(true);
       Alert.alert("Success", `Connected using ${certificate.name}`);
@@ -148,7 +150,7 @@ console.log("OVPN File Content:", ovpnString);
       Alert.alert("Error", `Failed to connect: ${errorMessage}`);
     }
   };
-  
+
 
   // Disconnect VPN
   const handleDisconnect = async () => {
@@ -162,7 +164,7 @@ console.log("OVPN File Content:", ovpnString);
       setVpnStatus("Disconnected");
       setIsConnected(false);
       Alert.alert("Disconnected", "VPN has been disconnected.");
-      
+
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       Alert.alert("Error", `Failed to disconnect: ${errorMessage}`);
@@ -221,7 +223,7 @@ console.log("OVPN File Content:", ovpnString);
       caCert.setExtensions([{ name: 'basicConstraints', cA: true }]);
       caCert.sign(caKeys.privateKey, forge.md.sha256.create());
       console.log(caAttrs)
-      
+
       // Save CA Certificate and Key
       const caCertPem = forge.pki.certificateToPem(caCert);
       const caKeyPem = forge.pki.privateKeyToPem(caKeys.privateKey);
@@ -237,13 +239,13 @@ console.log("OVPN File Content:", ovpnString);
         cert.validity.notAfter = new Date();
         cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 5);
         const certName = `${commonName}_${currentCertName}`;
-        
+
         cert.setSubject([
           { name: 'commonName', value: certName },
           { name: 'organizationName', value: 'HomeNet VPN' },
           { name: 'organizationalUnitName', value: username }, // Store username in the cert metadata
         ]);
-        
+
         cert.setIssuer(caCert.subject.attributes);
         cert.setExtensions([
           { name: 'basicConstraints', cA: false },
@@ -301,15 +303,15 @@ console.log("OVPN File Content:", ovpnString);
           `VPN Certificate created for ${certName}. You can now connect remotely.`,
           [{ text: "OK" }]
         );
-          const saveCreatedCertificate = async (certName: any, certContent: any, username: any, password: any) => {
-            const newCert = { name: certName, content: certContent, username, password };
-            const updatedCerts = [...certificates, newCert];
-          
-            setCertificates(updatedCerts);
-            await AsyncStorage.setItem("certificates", JSON.stringify(updatedCerts));
-          };
-          
-          await saveCreatedCertificate(filename, certPem, username, password);
+        const saveCreatedCertificate = async (certName: any, certContent: any, username: any, password: any) => {
+          const newCert = { name: certName, content: certContent, username, password };
+          const updatedCerts = [...certificates, newCert];
+
+          setCertificates(updatedCerts);
+          await AsyncStorage.setItem("certificates", JSON.stringify(updatedCerts));
+        };
+
+        await saveCreatedCertificate(filename, certPem, username, password);
       };
 
       // Generate client certificate using username input
@@ -322,154 +324,154 @@ console.log("OVPN File Content:", ovpnString);
       console.log(errorMessage);
     }
   };
-    
+
   return (
     <ScrollView>
-    <View style={styles.container}>
-      <Image 
-        source={require('../assets/images/HomeNetLogo2.png')} 
-        style={styles.headerImage} 
-        resizeMode="contain" 
-      />
+      <View style={styles.container}>
+        <Image
+          source={require('../assets/images/HomeNetLogo2.png')}
+          style={styles.headerImage}
+          resizeMode="contain"
+        />
 
-      <Text style={styles.statusLabel}>VPN Status:</Text>
-      <Text
-        style={[
-          styles.status,
-          isConnected ? styles.connected : styles.disconnected,
-        ]}
-      >
-        {vpnStatus}
-      </Text>
-
-      {!isConnected ? (
-        <TouchableOpacity
+        <Text style={styles.statusLabel}>VPN Status:</Text>
+        <Text
           style={[
-            styles.connectButton,
-            !selectedCertificate && styles.disabledButton,
+            styles.status,
+            isConnected ? styles.connected : styles.disconnected,
           ]}
-          onPress={handleConnect}
-          disabled={!selectedCertificate}
         >
-          <Text style={styles.buttonText}>Connect</Text>
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity
-          style={styles.disconnectButton}
-          onPress={handleDisconnect}
-        >
-          <Text style={styles.buttonText}>Disconnect</Text>
-        </TouchableOpacity>
-      )}
+          {vpnStatus}
+        </Text>
 
-      <View style={styles.certificateSection}>
-        <Text style={styles.label}>Manage Certificates:</Text>
-        <TouchableOpacity
-          style={styles.importButton}
-          onPress={handleImportCertificate}
-        >
-          <Text style={styles.buttonText}>Import Certificate</Text>
-        </TouchableOpacity>
+        {!isConnected ? (
+          <TouchableOpacity
+            style={[
+              styles.connectButton,
+              !selectedCertificate && styles.disabledButton,
+            ]}
+            onPress={handleConnect}
+            disabled={!selectedCertificate}
+          >
+            <Text style={styles.buttonText}>Connect</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.disconnectButton}
+            onPress={handleDisconnect}
+          >
+            <Text style={styles.buttonText}>Disconnect</Text>
+          </TouchableOpacity>
+        )}
 
-        <TouchableOpacity style={styles.createCertButton} onPress={() => setModalVisibleCreate(true)}>
-        <Text style={styles.buttonText}>Create VPN Certificate</Text>
-        </TouchableOpacity>
-        
-        {certificates.length > 0 && (
-  <View style={styles.certificateList}>
-    <Text style={styles.listHeader}>Imported Certificates:</Text>
-    {certificates.map((cert, index) => (
-      <View key={index} style={styles.certificateItemContainer}>
-        <TouchableOpacity
-          style={[
-            styles.certificateItem,
-            selectedCertificate === cert.name && styles.selected,
-          ]}
-          onPress={() => setSelectedCertificate(cert.name)}
-        >
-          <Text style={styles.certificateText}>{cert.name}</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => handleDeleteCertificate(cert.name)}
-        >
-          <Text style={styles.deleteButtonText}>Delete</Text>
-        </TouchableOpacity>
+        <View style={styles.certificateSection}>
+          <Text style={styles.label}>Manage Certificates:</Text>
+          <TouchableOpacity
+            style={styles.importButton}
+            onPress={handleImportCertificate}
+          >
+            <Text style={styles.buttonText}>Import Certificate</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.createCertButton} onPress={() => setModalVisibleCreate(true)}>
+            <Text style={styles.buttonText}>Create VPN Certificate</Text>
+          </TouchableOpacity>
+
+          {certificates.length > 0 && (
+            <View style={styles.certificateList}>
+              <Text style={styles.listHeader}>Imported Certificates:</Text>
+              {certificates.map((cert, index) => (
+                <View key={index} style={styles.certificateItemContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.certificateItem,
+                      selectedCertificate === cert.name && styles.selected,
+                    ]}
+                    onPress={() => setSelectedCertificate(cert.name)}
+                  >
+                    <Text style={styles.certificateText}>{cert.name}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={() => handleDeleteCertificate(cert.name)}
+                  >
+                    <Text style={styles.deleteButtonText}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Modal for Username and Password */}
+          <Modal
+            visible={modalVisibleImport}
+            transparent={true}
+            animationType="slide"
+          >
+            <View style={styles.modalContainer}>
+              <View style={styles.modalContainer}>
+                <Text style={styles.modalTitle}>Enter Credentials</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Username"
+                  value={username}
+                  onChangeText={setUsername}
+                />
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Password"
+                  value={password}
+                  secureTextEntry
+                  onChangeText={setPassword}
+                />
+                <TouchableOpacity
+                  style={styles.modalButton}
+                  onPress={saveCertificate}
+                >
+                  <Text style={styles.buttonText}>Save Certificate</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+          <Modal
+            visible={modalVisibleCreate}
+            transparent={true}
+            animationType="slide"
+          >
+            <View style={styles.modalContainer}>
+              <View style={styles.modalContainer}>
+                <Text style={styles.modalTitle}>Enter Credentials</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Username"
+                  value={username}
+                  onChangeText={setUsername}
+                />
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Password"
+                  value={password}
+                  secureTextEntry
+                  onChangeText={setPassword}
+                />
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Certificate Name"
+                  value={currentCertName}
+                  onChangeText={setCurrentCertName}
+                />
+                <TouchableOpacity
+                  style={styles.modalButton}
+                  onPress={handleCreateCertificate}
+                >
+                  <Text style={styles.buttonText}>Save Certificate</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+        </View>
       </View>
-    ))}
-  </View>
-)}
-
-      {/* Modal for Username and Password */}
-      <Modal
-          visible={modalVisibleImport}
-          transparent={true}
-          animationType="slide"
-        >
-          <View style={styles.modalContainer}>
-            <View style={styles.modalContainer}>
-              <Text style={styles.modalTitle}>Enter Credentials</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="Username"
-                value={username}
-                onChangeText={setUsername}
-              />
-              <TextInput
-                style={styles.modalInput}
-                placeholder="Password"
-                value={password}
-                secureTextEntry
-                onChangeText={setPassword}
-              />
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={saveCertificate}
-              >
-                <Text style={styles.buttonText}>Save Certificate</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-        <Modal
-          visible={modalVisibleCreate}
-          transparent={true}
-          animationType="slide"
-        >
-          <View style={styles.modalContainer}>
-            <View style={styles.modalContainer}>
-              <Text style={styles.modalTitle}>Enter Credentials</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="Username"
-                value={username}
-                onChangeText={setUsername}
-              />
-              <TextInput
-                style={styles.modalInput}
-                placeholder="Password"
-                value={password}
-                secureTextEntry
-                onChangeText={setPassword}
-              />
-              <TextInput
-                style={styles.modalInput}
-                placeholder="Certificate Name"
-                value={currentCertName}
-                onChangeText={setCurrentCertName}
-              />
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={handleCreateCertificate}
-              >
-                <Text style={styles.buttonText}>Save Certificate</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-    </View>
-    </View>
     </ScrollView>
   );
 }
@@ -491,9 +493,9 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   headerImage: {
-    width: 500, 
-    height: 300, 
-    marginBottom: 20, 
+    width: 500,
+    height: 300,
+    marginBottom: 20,
   },
   statusLabel: {
     fontSize: 18,
@@ -524,7 +526,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   createCertButton: {
-    backgroundColor: "#4cb3fa", 
+    backgroundColor: "#4cb3fa",
     padding: 10,
     borderRadius: 10,
     marginBottom: 10,
@@ -594,19 +596,19 @@ const styles = StyleSheet.create({
     marginVertical: 5,
     borderRadius: 8,
   },
-  
+
   deleteButton: {
     backgroundColor: "#FF6347",
     paddingVertical: 5,
     paddingHorizontal: 10,
     borderRadius: 5,
   },
-  
+
   deleteButtonText: {
     color: "white",
     fontWeight: "bold",
   },
-  
+
   modalBackground: {
     flex: 1,
     justifyContent: "center",
