@@ -250,7 +250,7 @@ export default function App() {
         cert.setExtensions([
           { name: 'basicConstraints', cA: false },
           { name: 'keyUsage', keyCertSign: false, digitalSignature: true, keyEncipherment: true },
-          { name: 'extendedKeyUsage', serverAuth: false, clientAuth: true }
+          { name: 'extKeyUsage', serverAuth: false, clientAuth: true }
         ]);
         cert.sign(caKeys.privateKey, forge.md.sha256.create());
         //const certName = `${commonName}_${currentCertName}`;
@@ -317,6 +317,7 @@ export default function App() {
       // Generate client certificate using username input
       await generateCertificate('client');
       setModalVisibleCreate(false);
+      //
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
