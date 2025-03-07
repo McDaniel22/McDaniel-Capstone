@@ -6,7 +6,7 @@ import * as FileSystem from "expo-file-system";
 import 'expo-dev-client';
 import forge from 'node-forge';
 import RNFS from 'react-native-fs';
-import { StyleSheet, Text, View, TouchableOpacity, Alert, Image, ScrollView, Modal, TextInput, } from "react-native";
+import { StyleSheet, Text, View, TouchableOpacity, Alert, Image, ScrollView, Modal, TextInput, Button, } from "react-native";
 
 
 export default function App() {
@@ -99,12 +99,41 @@ export default function App() {
     }
   };
 
-  // Certs load on start
+  // Certs load on start & checks for vpn connection so app doesnt break
   React.useEffect(() => {
     loadCertificatesFromStorage();
+    const checkVpnStatus = async () => {
+      try {
+        const currentState = await RNSimpleOpenvpn.getCurrentState();
+        console.log("VPN Status on Load:", currentState);
+
+        if (currentState === RNSimpleOpenvpn.VpnState.VPN_STATE_CONNECTED) {
+          setIsConnected(true);
+          setVpnStatus("Connected");
+        } else {
+          setIsConnected(false);
+          setVpnStatus("Disconnected");
+        }
+      } catch (error) {
+        console.error("Error checking VPN status:", error);
+      }
+    };
+
+    checkVpnStatus();
   }, []);
 
   const handleConnect = async () => {
+    try {
+      const currentState = await RNSimpleOpenvpn.getCurrentState();
+      if (currentState === RNSimpleOpenvpn.VpnState.VPN_STATE_CONNECTED) {
+        Alert.alert("Info", "VPN is already connected.");
+        setIsConnected(true); 
+        setVpnStatus("Connected");
+        return;
+      }
+    } catch (error) {
+      console.log("Error checking VPN status:", error);
+    }
     if (!selectedCertificate) {
       Alert.alert("Error", "No certificate selected.");
       return;
@@ -122,7 +151,6 @@ export default function App() {
       Alert.alert("Error", "Invalid certificate data.");
       return;
     }
-
     try {
       setVpnStatus("Connecting...");
       await RNSimpleOpenvpn.connect({
@@ -131,7 +159,6 @@ export default function App() {
         password: certificate.password,
         providerBundleIdentifier: ""
       });
-
       // Wait for VPN to fully connect
       let status = await RNSimpleOpenvpn.getCurrentState();
       while (status !== RNSimpleOpenvpn.VpnState.VPN_STATE_CONNECTED) {
@@ -140,7 +167,6 @@ export default function App() {
         console.log(status);
         console.log(JSON.stringify(RNSimpleOpenvpn.VpnState));
       }
-
       setVpnStatus("Connected");
       setIsConnected(true);
       Alert.alert("Success", `Connected using ${certificate.name}`);
@@ -200,131 +226,85 @@ export default function App() {
       ]
     );
   };
-  // Function to create a VPN certificate
+  //Creates VPN cert from same network as pi
   const handleCreateCertificate = async () => {
     try {
-      // Generate CA Key Pair
-      Alert.alert("Creating Certificate", "Please wait while we create your certificate. This may take a minute.");
-      const generateStaticKey = () => {
-        const staticKey = forge.util.bytesToHex(forge.random.getBytesSync(2048)); // Generates a 2048-bit static key
-        return `-----BEGIN OpenVPN Static key V1-----\n${staticKey}\n-----END OpenVPN Static key V1-----`;
-      };
-      const caKeys = forge.pki.rsa.generateKeyPair(2048);
-      const caCert = forge.pki.createCertificate();
-      caCert.publicKey = caKeys.publicKey;
-      caCert.serialNumber = '01';
-      caCert.validity.notBefore = new Date();
-      caCert.validity.notAfter = new Date();
-      caCert.validity.notAfter.setFullYear(caCert.validity.notBefore.getFullYear() + 10);
-      //console.log(caCert)
-      const caAttrs = [{ name: 'commonName', value: 'HomeNet CA' }];
-      caCert.setSubject(caAttrs);
-      caCert.setIssuer(caAttrs);
-      caCert.setExtensions([{ name: 'basicConstraints', cA: true }]);
-      caCert.sign(caKeys.privateKey, forge.md.sha256.create());
-      console.log(caAttrs)
-
-      // Save CA Certificate and Key
-      const caCertPem = forge.pki.certificateToPem(caCert);
-      const caKeyPem = forge.pki.privateKeyToPem(caKeys.privateKey);
-      await RNFS.writeFile(RNFS.DocumentDirectoryPath + '/ca.crt', caCertPem, 'utf8');
-      await RNFS.writeFile(RNFS.DocumentDirectoryPath + '/ca.key', caKeyPem, 'utf8');
-      // Function to create client certificate with username metadata
-      const generateCertificate = async (commonName: string) => {
-        const keys = forge.pki.rsa.generateKeyPair(2048);
-        const cert = forge.pki.createCertificate();
-        cert.publicKey = keys.publicKey;
-        cert.serialNumber = (Math.floor(Math.random() * 1000000) + 1).toString();
-        cert.validity.notBefore = new Date();
-        cert.validity.notAfter = new Date();
-        cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 5);
-        const certName = `${commonName}_${currentCertName}`;
-
-        cert.setSubject([
-          { name: 'commonName', value: certName },
-          { name: 'organizationName', value: 'HomeNet VPN' },
-          { name: 'organizationalUnitName', value: username }, // Store username in the cert metadata
-        ]);
-
-        cert.setIssuer(caCert.subject.attributes);
-        cert.setExtensions([
-          { name: 'basicConstraints', cA: false },
-          { name: 'keyUsage', keyCertSign: false, digitalSignature: true, keyEncipherment: true },
-          { name: 'extKeyUsage', serverAuth: false, clientAuth: true }
-        ]);
-        cert.sign(caKeys.privateKey, forge.md.sha256.create());
-        //const certName = `${commonName}_${currentCertName}`;
-        const caCertPem = forge.pki.certificateToPem(caCert);
-        const certPem = forge.pki.certificateToPem(cert);
-        const keyPem = forge.pki.privateKeyToPem(keys.privateKey);
-        const filename = `${certName}.ovpn`;
-        const staticKey = generateStaticKey();
-        const ovpnProfile = `
-          client
-          dev tun
-          proto udp
-          remote your.server.com 1194
-          resolv-retry infinite
-          nobind
-          persist-key
-          persist-tun
-          auth SHA256
-          cipher AES-256-CBC
-          verb 3
-          <ca>
-          ${caCertPem.trim()}
-          </ca>
-
-          <cert>
-          ${certPem.trim()}
-          </cert>
-          
-          <key>
-          ${keyPem.trim()}
-          </key>
-
-          <tls-auth>
-          ${staticKey.trim()}
-          </tls-auth>
-          `;
-        console.log(filename)
-        console.log(username)
-        console.log(password)
-        console.log(certName);
-        await RNFS.writeFile(`${RNFS.DocumentDirectoryPath}/${filename}`, ovpnProfile, "utf8");
-        // Store the certificate in the app’s document directory
-        // Update the imported certificate list
-        setCertificates((prev) => [
-          ...prev,
-          { name: filename, content: ovpnProfile, username, password },
-        ]);
-        Alert.alert(
-          "Success",
-          `VPN Certificate created for ${certName}. You can now connect remotely.`,
-          [{ text: "OK" }]
-        );
-        const saveCreatedCertificate = async (certName: any, certContent: any, username: any, password: any) => {
-          const newCert = { name: certName, content: certContent, username, password };
-          const updatedCerts = [...certificates, newCert];
-
-          setCertificates(updatedCerts);
-          await AsyncStorage.setItem("certificates", JSON.stringify(updatedCerts));
-        };
-
-        await saveCreatedCertificate(filename, certPem, username, password);
-      };
-
-      // Generate client certificate using username input
-      await generateCertificate('client');
+      if (!username || !password || !currentCertName) {
+        Alert.alert("Error", "Missing required fields!");
+        return;
+      }
+      Alert.alert("Creating Certificate", "Generating your certificate...",[]);
+  
+      console.log("Generating key pair...");
+      // Generate Private Key
+      const keys = forge.pki.rsa.generateKeyPair(2048);
+      const privateKeyPem = forge.pki.privateKeyToPem(keys.privateKey);
+  
+      console.log("Generating CSR...");
+      // Generate CSR (Certificate Signing Request)
+      const csr = forge.pki.createCertificationRequest();
+      csr.publicKey = keys.publicKey;
+      csr.setSubject([{ name: "commonName", value: username }]);
+  
+      // Required for OpenVPN compatibility
+      csr.setAttributes([{ name: "countryName", value: "US" }]);
+  
+      csr.sign(keys.privateKey);
+  
+      // Convert to PEM format
+      const csrPem = forge.pki.certificationRequestToPem(csr).trim();
+  
+      console.log("Generated CSR:", csrPem);
+  
+      // Send CSR to Raspberry Pi for signing
+      const response = await fetch("http://192.168.50.30:5000/sign_certificate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, csrPem }),
+        //timeout: 0,
+      });
+  
+      console.log("Response status:", response.status, response.statusText);
+  
+      if (!response.ok) {
+        throw new Error(`Pi error: ${response.status} ${response.statusText}`);
+      }
+  
+      const data = await response.json();
+      console.log("Received signed certificate:", data);
+  
+      if (!data.signedCertPem) {
+        throw new Error("Signed certificate is missing in response!");
+      }
+      const fileContent = data.signedCertPem;
+      const certificateName = `${currentCertName}.ovpn`;
+      setCurrentCertName(certificateName);
+      const newFileUri = `${FileSystem.documentDirectory}${certificateName}`;
+      console.log("Writing certificate to file:", newFileUri);
+      console.log("Certificate Name:", certificateName);
+      await FileSystem.writeAsStringAsync(
+        newFileUri,
+        fileContent,
+        { encoding: FileSystem.EncodingType.UTF8 }
+      );
+      //setCurrentCertName(certificateName);
+      Alert.alert("Success", "Certificate created successfully.");
+      
+      setCurrentCertContent(fileContent);
       setModalVisibleCreate(false);
-      //
-
+      setModalVisibleImport(true);
     } catch (error) {
+      if (error instanceof Error) {
+        console.error("Network Error:", error.message);
+      } else {
+        console.error("Network Error:", error);
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       Alert.alert("Error", `Certificate creation failed: ${errorMessage}`);
-      console.log(errorMessage);
     }
   };
+  
+  
 
   return (
     <ScrollView>
