@@ -127,7 +127,7 @@ export default function App() {
       const currentState = await RNSimpleOpenvpn.getCurrentState();
       if (currentState === RNSimpleOpenvpn.VpnState.VPN_STATE_CONNECTED) {
         Alert.alert("Info", "VPN is already connected.");
-        setIsConnected(true); 
+        setIsConnected(true);
         setVpnStatus("Connected");
         return;
       }
@@ -160,16 +160,22 @@ export default function App() {
         providerBundleIdentifier: ""
       });
       // Wait for VPN to fully connect
-      let status = await RNSimpleOpenvpn.getCurrentState();
-      while (status !== RNSimpleOpenvpn.VpnState.VPN_STATE_CONNECTED) {
+      let status;
+      do {
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
         status = await RNSimpleOpenvpn.getCurrentState();
         console.log(status);
         console.log(JSON.stringify(RNSimpleOpenvpn.VpnState));
+      } while (status !== RNSimpleOpenvpn.VpnState.VPN_STATE_CONNECTED && status !== RNSimpleOpenvpn.VpnState.VPN_STATE_DISCONNECTED);
+      if (status === RNSimpleOpenvpn.VpnState.VPN_STATE_CONNECTED) {
+        setVpnStatus("Connected");
+        setIsConnected(true);
+        Alert.alert("Success", `Connected using ${certificate.name}`);
+      } else {
+        setVpnStatus("Disconnected");
+        setIsConnected(false);
+        Alert.alert("Error", "Failed to connect to VPN.");
       }
-      setVpnStatus("Connected");
-      setIsConnected(true);
-      Alert.alert("Success", `Connected using ${certificate.name}`);
     } catch (error) {
       setVpnStatus("Disconnected");
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -233,29 +239,34 @@ export default function App() {
         Alert.alert("Error", "Missing required fields!");
         return;
       }
-      Alert.alert("Creating Certificate", "Generating your certificate...",[]);
-  
+      Alert.alert("Creating Certificate", "Generating your certificate...", []);
+      const generateStaticKey = () => {
+        const staticKey = forge.util.bytesToHex(forge.random.getBytesSync(2048)); // Generates a 2048-bit static key
+        return `-----BEGIN OpenVPN Static key V1-----\n${staticKey}\n-----END OpenVPN Static key V1-----`;
+      };
+      const staticKey = generateStaticKey();
       console.log("Generating key pair...");
       // Generate Private Key
       const keys = forge.pki.rsa.generateKeyPair(2048);
       const privateKeyPem = forge.pki.privateKeyToPem(keys.privateKey);
-  
+
       console.log("Generating CSR...");
       // Generate CSR (Certificate Signing Request)
       const csr = forge.pki.createCertificationRequest();
       csr.publicKey = keys.publicKey;
+
       csr.setSubject([{ name: "commonName", value: username }]);
-  
+
       // Required for OpenVPN compatibility
       csr.setAttributes([{ name: "countryName", value: "US" }]);
-  
+
       csr.sign(keys.privateKey);
-  
+
       // Convert to PEM format
       const csrPem = forge.pki.certificationRequestToPem(csr).trim();
-  
+
       console.log("Generated CSR:", csrPem);
-  
+
       // Send CSR to Raspberry Pi for signing
       const response = await fetch("http://192.168.50.30:5000/sign_certificate", {
         method: "POST",
@@ -263,19 +274,59 @@ export default function App() {
         body: JSON.stringify({ username, csrPem }),
         //timeout: 0,
       });
-  
+
       console.log("Response status:", response.status, response.statusText);
-  
+
       if (!response.ok) {
         throw new Error(`Pi error: ${response.status} ${response.statusText}`);
       }
-  
+
       const data = await response.json();
       console.log("Received signed certificate:", data);
-  
+
       if (!data.signedCertPem) {
         throw new Error("Signed certificate is missing in response!");
       }
+
+      const ovpnProfile = `
+client
+proto udp
+explicit-exit-notify
+remote 192.168.50.30 1194
+dev tun
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+verify-x509-name server_Z5dSfRUV9TzADZcF name
+auth SHA256
+auth-nocache
+cipher AES-128-GCM
+tls-client
+tls-version-min 1.2
+tls-cipher TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256
+ignore-unknown-option block-outside-dns
+setenv opt block-outside-dns # Prevent Windows 10 DNS leak
+verb 3
+          <ca>
+          ${data.caCertPem.trim()}
+          </ca>
+
+          <cert>
+          ${data.signedCertPem.trim()}
+          </cert>
+          
+          <key>
+          ${privateKeyPem.trim()}
+          </key>
+
+          <tls-crypt>
+          ${data.tlsStaticKey.trim()}
+          </tls-crypt>
+          `;
+
+
       const fileContent = data.signedCertPem;
       const certificateName = `${currentCertName}.ovpn`;
       setCurrentCertName(certificateName);
@@ -284,13 +335,13 @@ export default function App() {
       console.log("Certificate Name:", certificateName);
       await FileSystem.writeAsStringAsync(
         newFileUri,
-        fileContent,
+        ovpnProfile,
         { encoding: FileSystem.EncodingType.UTF8 }
       );
       //setCurrentCertName(certificateName);
       Alert.alert("Success", "Certificate created successfully.");
-      
-      setCurrentCertContent(fileContent);
+
+      setCurrentCertContent(ovpnProfile);
       setModalVisibleCreate(false);
       setModalVisibleImport(true);
     } catch (error) {
@@ -303,8 +354,8 @@ export default function App() {
       Alert.alert("Error", `Certificate creation failed: ${errorMessage}`);
     }
   };
-  
-  
+
+
 
   return (
     <ScrollView>
