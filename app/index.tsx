@@ -33,7 +33,7 @@ export default function App() {
         copyToCacheDirectory: true
       });
 
-      if (!result.canceled) {
+      if (!result.canceled && result.assets && result.assets.length > 0) {
         const certificateUri = result.assets[0].uri;
         const certificateName = result.assets[0].name;
         // Check if the selected file is an OpenVPN file
@@ -159,6 +159,11 @@ export default function App() {
         password: certificate.password,
         providerBundleIdentifier: ""
       });
+      console.log("username:", certificate.username);
+      console.log("password:", certificate.password);
+      console.log("ovpnString:", ovpnString);
+
+
       // Wait for VPN to fully connect
       let status;
       do {
@@ -167,6 +172,8 @@ export default function App() {
         console.log(status);
         console.log(JSON.stringify(RNSimpleOpenvpn.VpnState));
       } while (status !== RNSimpleOpenvpn.VpnState.VPN_STATE_CONNECTED && status !== RNSimpleOpenvpn.VpnState.VPN_STATE_DISCONNECTED);
+
+
       if (status === RNSimpleOpenvpn.VpnState.VPN_STATE_CONNECTED) {
         setVpnStatus("Connected");
         setIsConnected(true);
@@ -175,11 +182,13 @@ export default function App() {
         setVpnStatus("Disconnected");
         setIsConnected(false);
         Alert.alert("Error", "Failed to connect to VPN.");
+        
       }
     } catch (error) {
       setVpnStatus("Disconnected");
       const errorMessage = error instanceof Error ? error.message : String(error);
       Alert.alert("Error", `Failed to connect: ${errorMessage}`);
+      
     }
   };
 
@@ -200,6 +209,7 @@ export default function App() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       Alert.alert("Error", `Failed to disconnect: ${errorMessage}`);
+      
     }
   };
   const handleDeleteCertificate = (nameToDelete: string) => {
@@ -247,7 +257,8 @@ export default function App() {
       const staticKey = generateStaticKey();
       console.log("Generating key pair...");
       // Generate Private Key
-      const keys = forge.pki.rsa.generateKeyPair(2048);
+      const keys = forge.pki.rsa.generateKeyPair({ bits: 2048, workers: 2 });
+      //const privateKeyPem = forge.pki.encryptRsaPrivateKey(keys.privateKey, password);
       const privateKeyPem = forge.pki.privateKeyToPem(keys.privateKey);
 
       console.log("Generating CSR...");
@@ -308,26 +319,24 @@ tls-version-min 1.2
 tls-cipher TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256
 ignore-unknown-option block-outside-dns
 setenv opt block-outside-dns # Prevent Windows 10 DNS leak
-verb 3
-          <ca>
-          ${data.caCertPem.trim()}
-          </ca>
+verb 5
+<ca>
+${data.caCertPem.trim()}
+</ca>
 
-          <cert>
-          ${data.signedCertPem.trim()}
-          </cert>
-          
-          <key>
-          ${privateKeyPem.trim()}
-          </key>
+<cert>
+${data.signedCertPem.trim()}
+</cert>
 
-          <tls-crypt>
-          ${data.tlsStaticKey.trim()}
-          </tls-crypt>
-          `;
+<key>
+${privateKeyPem.trim()}
+</key>
 
+<tls-crypt>
+${data.tlsStaticKey.trim()}
+</tls-crypt>
+`;
 
-      const fileContent = data.signedCertPem;
       const certificateName = `${currentCertName}.ovpn`;
       setCurrentCertName(certificateName);
       const newFileUri = `${FileSystem.documentDirectory}${certificateName}`;
